@@ -1,12 +1,8 @@
-version: '3.8'
-
 networks:
   civicmesh-net:
     driver: bridge
-
 volumes:
   shared-runs:
-
 services:
   peer1:
     build: .
@@ -25,7 +21,6 @@ services:
       --port 8001
       --topics Santiago Providencia
       --run-id compose-run
-
   peer2:
     build: .
     container_name: civicmesh-peer2
@@ -46,7 +41,6 @@ services:
       --topics Providencia Las_Condes Nunoa
       --seeds peer1:8001
       --run-id compose-run
-
   peer3:
     build: .
     container_name: civicmesh-peer3
@@ -67,7 +61,6 @@ services:
       --topics La_Florida Puente_Alto San_Joaquin
       --seeds peer1:8001
       --run-id compose-run
-
   publisher:
     build: .
     container_name: civicmesh-publisher
@@ -88,7 +81,6 @@ services:
       --domain delitos
       --interval 2.0
       --run-id compose-run
-
   frontend:
     build: .
     container_name: civicmesh-frontend

@@ -28,9 +28,9 @@ jobs:
 
       - name: Linting con flake8
         run: |
-          # Stop build if there are Python syntax errors or undefined names
+          # Aborta el build si hay errores de sintaxis o nombres indefinidos
           flake8 civicmesh tests --count --select=E9,F63,F7,F82 --show-source --statistics
-          # exit-zero treats all errors as warnings
+          # exit-zero trata el resto de reglas como advertencias, no bloquean el CI
           flake8 civicmesh tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Pruebas Unitarias
@@ -62,8 +62,11 @@ jobs:
       - name: Verificar que los contenedores siguen corriendo
         run: |
           docker compose ps
-          # Si algún servicio salió con error, docker compose ps lo marca como "Exit"
-          if docker compose ps --status exited | grep -q .; then
+          # docker compose ps siempre imprime la fila de encabezado, incluso sin
+          # coincidencias — por eso usamos --quiet (solo IDs, vacío si no hay
+          # ninguno) en vez de contar líneas de la salida con formato tabla.
+          EXITED_IDS=$(docker compose ps --status exited --quiet)
+          if [ -n "$EXITED_IDS" ]; then
             echo "Uno o más servicios de la malla terminaron inesperadamente:"
             docker compose ps --status exited
             docker compose logs
