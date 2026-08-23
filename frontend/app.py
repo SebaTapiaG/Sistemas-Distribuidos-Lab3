@@ -1,8 +1,7 @@
 """
 frontend/app.py
 Dashboard interactivo de monitoreo en Streamlit para CivicMesh.
-Consume métricas JSONL desde $CIVICMESH_RUNS/<run_id>/metrics/ y presenta
-estado por tópico x canal, brecha percepción-realidad y convergencia entre peers.
+Consume métricas JSONL y presenta estado por tópico x canal.
 """
 
 import json
@@ -14,177 +13,284 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+# ==========================================
+# 1. CONFIGURACIÓN DE PÁGINA
+# ==========================================
 st.set_page_config(
-    page_title="CivicMesh Monitor - SDP 1-2026",
+    page_title="CivicMesh Monitor",
     page_icon="📡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed", # Ocultar barra lateral por defecto
 )
 
-# Ocultar botones de deploy, menús publicitarios y encabezado de Streamlit
+# ==========================================
+# 2. CSS MINIMALISTA Y PROFESIONAL
+# ==========================================
 st.markdown("""
 <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display: none !important; visibility: hidden !important;}
-    [data-testid="stToolbar"] {display: none !important; visibility: hidden !important;}
-    [data-testid="stDecoration"] {display: none !important; visibility: hidden !important;}
-    [data-testid="stHeader"] {display: none !important; visibility: hidden !important;}
-    div[class*="stDeployButton"] {display: none !important;}
+    /* Ocultar elementos nativos de Streamlit (Header, Footer, Menu, Sidebar toggle) */
+    header { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    [data-testid="stSidebar"] { display: none !important; }
+    
+    /* Reducir el padding superior para aprovechar el espacio */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 95% !important;
+    }
+
+    /* Diseño Minimalista para Tarjetas de Métricas (Glassmorphism sutil) */
+    [data-testid="stMetric"] {
+        background-color: rgba(30, 30, 32, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        padding: 20px 24px;
+        border-radius: 12px;
+        transition: transform 0.2s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    
+    /* Tipografía de las métricas */
+    [data-testid="stMetricLabel"] {
+        font-size: 0.95rem !important;
+        color: #8E8E93 !important;
+        font-weight: 500 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 2.2rem !important;
+        color: #0A84FF !important; /* Azul moderno */
+        font-weight: 600 !important;
+    }
+    
+    /* Estilos para las pestañas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📡 CivicMesh: Monitoreo Ciudadano P2P")
-st.markdown(
-    "**Sistemas Distribuidos y Paralelos (USACH)** — *Framework Gossip + Pub/Sub Geográfico*"
-)
+# ==========================================
+# 3. ENCABEZADO Y CONTROLES (LAYOUT HORIZONTAL)
+# ==========================================
+title_col, ctrl_col1, ctrl_col2 = st.columns([3, 1, 1])
 
-# 1. Selector de Corrida (Run ID)
+with title_col:
+    st.title("📡 CivicMesh Monitor")
+    st.caption("Sistemas Distribuidos y Paralelos | Framework Gossip + Pub/Sub Geográfico")
+
 env_runs = os.environ.get("CIVICMESH_RUNS", "runs")
 runs_base = Path(env_runs)
+available_runs = [d.name for d in runs_base.iterdir() if d.is_dir()] if runs_base.exists() else []
 
-available_runs = []
-if runs_base.exists():
-    available_runs = [d.name for d in runs_base.iterdir() if d.is_dir()]
+with ctrl_col1:
+    st.write("") # Espaciador para alinear
+    selected_run = st.selectbox(
+        "Corrida (Run ID)",
+        options=available_runs if available_runs else ["(Sin corridas)"],
+        label_visibility="collapsed"
+    )
 
-selected_run = st.sidebar.selectbox(
-    "Seleccionar Corrida (Run ID)",
-    options=available_runs if available_runs else ["(Sin corridas detectadas)"],
-)
+with ctrl_col2:
+    st.write("") # Espaciador para alinear
+    st.write("")
+    auto_refresh = st.checkbox("🔄 Auto-refresco (2s)", value=True)
 
-auto_refresh = st.sidebar.checkbox("Auto-refresco (2s)", value=True)
+st.markdown("---")
+
+if not available_runs or selected_run == "(Sin corridas)":
+    st.info(f"Esperando datos de ejecución en el directorio: `{runs_base.resolve()}`")
+    st.stop()
+
 if auto_refresh:
     time.sleep(2)
     st.rerun()
-
-if not available_runs or selected_run == "(Sin corridas detectadas)":
-    st.info(f"Esperando datos de ejecución en `{runs_base.resolve()}`...")
-    st.stop()
 
 current_run_path = runs_base / selected_run
 metrics_dir = current_run_path / "metrics"
 hostfile_path = current_run_path / "hostfile.txt"
 
-# 2. Cargar Hostfile y Nodos Activos
-st.sidebar.subheader("Nodos Registrados")
-if hostfile_path.exists():
-    with open(hostfile_path, "r", encoding="utf-8") as f:
-        hostfile_content = f.readlines()
-    for line in hostfile_content:
-        st.sidebar.text(f"🟢 {line.strip()}")
-else:
-    st.sidebar.text("No se encontró hostfile.txt")
-
-# 3. Cargar y Procesar Archivos de Métricas JSONL
+# ==========================================
+# 4. EXTRACCIÓN DE DATOS
+# ==========================================
 metric_files = list(metrics_dir.glob("*.jsonl")) if metrics_dir.exists() else []
-
 if not metric_files:
-    st.warning("No hay archivos de métricas disponibles aún en la corrida.")
+    st.warning("Recolectando métricas de la red. Esperando primer volcado de datos...")
     st.stop()
 
-peer_records = []
-publisher_records = []
-
+peer_records, publisher_records = [], []
 for m_file in metric_files:
     with open(m_file, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
-                continue
+            if not line.strip(): continue
             try:
                 data = json.loads(line)
-                if "peer_id" in data:
-                    peer_records.append(data)
-                elif "publisher_id" in data:
-                    publisher_records.append(data)
-            except Exception:
-                pass
+                if "peer_id" in data: peer_records.append(data)
+                elif "publisher_id" in data: publisher_records.append(data)
+            except: pass
 
-# 4. Resumen General en Métricas KPI
-st.subheader("Estado de la Malla")
-col1, col2, col3, col4 = st.columns(4)
-
+# ==========================================
+# 5. KPIS GLOBALES
+# ==========================================
 total_peers = len(set(r.get("peer_id") for r in peer_records))
-col1.metric("Peers Activos", total_peers)
-
 total_pubs = len(set(r.get("publisher_id") for r in publisher_records))
-col2.metric("Publicadores", total_pubs)
-
 all_topics = set()
-for r in peer_records:
-    all_topics.update(r.get("topics", {}).keys())
-col3.metric("Comunas Monitoreadas", len(all_topics))
-
+for r in peer_records: all_topics.update(r.get("topics", {}).keys())
 latest_ts = max([r.get("timestamp", 0) for r in peer_records + publisher_records], default=0)
-col4.metric("Última Actualización", time.strftime("%H:%M:%S", time.localtime(latest_ts)) if latest_ts else "N/A")
 
-# 5. Vista por Tópico x Canal
-st.markdown("---")
-st.subheader("📊 Estado por Tópico × Canal (Último Snapshot)")
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+m_col1.metric("Peers Activos", total_peers)
+m_col2.metric("Publicadores", total_pubs)
+m_col3.metric("Comunas", len(all_topics))
+m_col4.metric("Últ. Actualización", time.strftime("%H:%M:%S", time.localtime(latest_ts)) if latest_ts else "N/A")
 
+st.write("")
+st.write("")
+
+# ==========================================
+# 6. PROCESAMIENTO DE SNAPSHOT
+# ==========================================
 snapshot_rows = []
 for p_id in set(r.get("peer_id") for r in peer_records):
     p_last = [r for r in peer_records if r.get("peer_id") == p_id][-1]
-    topics_dict = p_last.get("topics", {})
-    for t_name, t_data in topics_dict.items():
+    for t_name, t_data in p_last.get("topics", {}).items():
         snapshot_rows.append({
             "Peer": p_id,
             "Comuna": t_name,
-            "Objetivo (Ground Truth)": round(t_data.get("objective_val", 0), 2),
-            "Eventos Obj": t_data.get("objective_events", 0),
-            "Subjetivo (Percepción)": round(t_data.get("subjective_val", 0), 2),
+            "Obj (Real)": round(t_data.get("objective_val", 0), 2),
+            "Eventos": t_data.get("objective_events", 0),
+            "Subj (Perc)": round(t_data.get("subjective_val", 0), 2),
             "Rumores": round(t_data.get("rumor_aggregate", 0), 2),
             "Memoria EMA": round(t_data.get("ema_memory", 0), 2),
-            "Brecha (Subj - Obj)": round(t_data.get("perception_gap", 0), 2),
-            "Hops Promedio": round(t_data.get("avg_hops_objective", 0), 1),
+            "Brecha": round(t_data.get("perception_gap", 0), 2),
+            "Hops": round(t_data.get("avg_hops_objective", 0), 1),
         })
 
-if snapshot_rows:
-    df_snapshot = pd.DataFrame(snapshot_rows)
-    st.dataframe(df_snapshot, use_container_width=True)
+df_snapshot = pd.DataFrame(snapshot_rows)
 
-# 6. Gráficos de Evolución Temporal y Brecha Percepción - Realidad
-st.markdown("---")
-st.subheader("📈 Brecha Percepción vs Realidad en el Tiempo")
+# ==========================================
+# 7. NAVEGACIÓN PRINCIPAL (TABS)
+# ==========================================
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Vista General", "📈 Temporal", "🔄 Convergencia", "🖥️ Topología"])
 
-selected_topic = st.selectbox("Seleccionar Comuna para Análisis Detallado", options=sorted(list(all_topics)) if all_topics else ["Santiago"])
+# --- TAB 1: Vista General ---
+with tab1:
+    if not df_snapshot.empty:
+        st.write("Estado actual de todos los tópicos y canales en la red P2P.")
+        styled_df = df_snapshot.style.background_gradient(
+            cmap='RdYlBu', subset=['Brecha'], vmin=-20, vmax=20
+        ).format(precision=2)
+        st.dataframe(styled_df, use_container_width=True, height=400)
+    else:
+        st.caption("Aún no hay datos de snapshot suficientes.")
 
-time_series_rows = []
-for r in peer_records:
-    p_id = r.get("peer_id")
-    ts = r.get("timestamp")
-    t_data = r.get("topics", {}).get(selected_topic)
-    if t_data:
-        time_series_rows.append({
-            "timestamp": ts,
-            "peer_id": p_id,
-            "objective": t_data.get("objective_val", 0),
-            "subjective": t_data.get("subjective_val", 0),
-            "perception_gap": t_data.get("perception_gap", 0),
-            "ema_memory": t_data.get("ema_memory", 0),
-        })
+# --- TAB 2: Análisis Temporal ---
+with tab2:
+    selected_topic = st.selectbox("Analizar Comuna Específica:", options=sorted(list(all_topics)) if all_topics else ["Santiago"])
 
-if time_series_rows:
-    df_ts = pd.DataFrame(time_series_rows).sort_values("timestamp")
-    
-    col_chart1, col_chart2 = st.columns(2)
-    
-    with col_chart1:
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(x=df_ts["timestamp"], y=df_ts["objective"], mode="lines+markers", name="Canal Objetivo (Real)", line=dict(color="#2ca02c", width=2)))
-        fig1.add_trace(go.Scatter(x=df_ts["timestamp"], y=df_ts["subjective"], mode="lines+markers", name="Canal Subjetivo (Percepción)", line=dict(color="#d62728", width=2, dash="dash")))
-        fig1.update_layout(title=f"Evolución Temporal en {selected_topic}", xaxis_title="Timestamp", yaxis_title="Valor")
-        st.plotly_chart(fig1, use_container_width=True)
+    time_series_rows = []
+    for r in peer_records:
+        t_data = r.get("topics", {}).get(selected_topic)
+        if t_data:
+            time_series_rows.append({
+                "timestamp": r.get("timestamp"),
+                "peer_id": r.get("peer_id"),
+                "objective": t_data.get("objective_val", 0),
+                "subjective": t_data.get("subjective_val", 0),
+                "perception_gap": t_data.get("perception_gap", 0),
+            })
 
-    with col_chart2:
-        fig2 = px.bar(df_ts, x="timestamp", y="perception_gap", color="peer_id", title=f"Brecha Percepción - Realidad (Pc - Gc) en {selected_topic}")
-        fig2.update_layout(xaxis_title="Timestamp", yaxis_title="Brecha")
-        st.plotly_chart(fig2, use_container_width=True)
+    if time_series_rows:
+        df_ts = pd.DataFrame(time_series_rows).sort_values("timestamp")
+        
+        # 1. SOLUCIÓN AL EJE X: Convertir el timestamp numérico a Fecha/Hora legible
+        df_ts["timestamp"] = pd.to_datetime(df_ts["timestamp"], unit='s')
+        
+        # OPCIONAL: Si aún es demasiada información, puedes descomentar la siguiente línea 
+        # para mostrar solo los últimos 1000 registros y evitar que se congele:
+        # df_ts = df_ts.tail(1000)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            fig1 = go.Figure()
+            fig1.add_trace(go.Scatter(x=df_ts["timestamp"], y=df_ts["objective"], mode="lines", name="Obj (Real)", line=dict(color="#34C759", width=2)))
+            fig1.add_trace(go.Scatter(x=df_ts["timestamp"], y=df_ts["subjective"], mode="lines", name="Subj (Perc)", line=dict(color="#FF3B30", width=2, dash="dash")))
+            fig1.update_layout(
+                title=f"Evolución: {selected_topic}", 
+                margin=dict(l=0, r=0, t=40, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)"
+            )
+            fig1.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(255,255,255,0.1)')
+            fig1.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(255,255,255,0.1)')
+            st.plotly_chart(fig1, use_container_width=True)
 
-# 7. Convergencia entre Peers
-st.markdown("---")
-st.subheader("🔄 Convergencia del Canal Objetivo entre Réplicas (Peers)")
-if snapshot_rows:
-    fig_conv = px.box(df_snapshot, x="Comuna", y="Objetivo (Ground Truth)", color="Comuna", points="all", title="Dispersión del Canal Objetivo entre Peers")
-    st.plotly_chart(fig_conv, use_container_width=True)
+        with c2:
+            # 2. SOLUCIÓN A LA SATURACIÓN: Cambiar px.bar por px.line
+            fig2 = px.line(df_ts, x="timestamp", y="perception_gap", color="peer_id", title=f"Brecha (Pc - Gc): {selected_topic}", color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig2.update_layout(
+                margin=dict(l=0, r=0, t=40, b=0),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1) # Movemos la leyenda arriba
+            )
+            fig2.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(255,255,255,0.1)')
+            fig2.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(255,255,255,0.1)')
+            st.plotly_chart(fig2, use_container_width=True)
+
+# --- TAB 3: Convergencia ---
+with tab3:
+    if not df_snapshot.empty:
+        st.write("Valores del Canal Objetivo (Ground Truth) reportados por cada Peer en el último instante.")
+        
+        # Agregamos un pequeño recuadro informativo
+        st.info("💡 Si los puntos están alineados horizontalmente, significa que el protocolo Gossip logró una **convergencia perfecta**.")
+        
+        # Cambiamos px.box por px.strip y coloreamos por "Peer"
+        fig_conv = px.strip(
+            df_snapshot, x="Comuna", y="Obj (Real)", color="Peer", 
+            stripmode="group",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        
+        # Agrandamos un poco los puntos para que se vean mejor
+        fig_conv.update_traces(marker=dict(size=10, opacity=0.8))
+        
+        fig_conv.update_layout(
+            margin=dict(l=0, r=0, t=20, b=0), 
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)"
+        )
+        fig_conv.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(255,255,255,0.1)')
+        st.plotly_chart(fig_conv, use_container_width=True)
+
+# --- TAB 4: Topología y Nodos ---
+with tab4:
+    st.write("Nodos actualmente registrados en la malla.")
+    if hostfile_path.exists():
+        with open(hostfile_path, "r", encoding="utf-8") as f:
+            nodos = f.readlines()
+        
+        if nodos:
+            for line in nodos:
+                st.code(line.strip(), language="bash")
+        else:
+            st.info("El archivo hostfile.txt está vacío.")
+    else:
+        st.caption("No se encontró hostfile.txt en esta corrida.")
