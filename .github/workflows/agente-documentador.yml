@@ -1,0 +1,142 @@
+name: Agente documentador
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  documentador:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Cachear modelos de Ollama
+        uses: actions/cache@v4
+        with:
+          path: ollama_models
+          key: ollama-qwen2.5-coder-7b-${{ runner.os }}
+
+      - name: Iniciar Ollama en Docker
+        run: |
+          mkdir -p ollama_models
+          docker run -d -v $(pwd)/ollama_models:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+          sleep 10
+          docker exec ollama ollama pull qwen2.5-coder:7b
+
+      - name: Revisar documentación con Ollama Local
+        id: revisar
+        run: |
+          export README_CONTENT=$(cat README.md 2>/dev/null || echo "No existe")
+          export CHANGELOG_CONTENT=$(cat CHANGELOG.md 2>/dev/null || echo "No existe")
+          
+          python3 << 'EOF' > payload.json
+          import json, os
+          
+          readme = os.environ.get('README_CONTENT', '')
+          changelog = os.environ.get('CHANGELOG_CONTENT', '')
+          
+          prompt = f"""Eres un agente revisor de documentación para CivicMesh: Framework P2P Pub/Sub para Monitoreo Ciudadano (Lab 3 SDP, USACH).
+          Revisa los siguientes documentos y detecta problemas concretos:
+          - Tabla de roles del equipo faltante o incompleta
+          - Falta de instrucciones de ejecución para Docker Compose, Local y Clúster Slurm ($CIVICMESH_RUNS)
+          - Explicación de los modelos estocásticos (Poisson/Inseguridad) y Replay de Calidad del Aire (IDW/OMS 2021)
+          - CHANGELOG desactualizado (sin entradas de Lab 3)
+          - Enlaces rotos o secciones vacías
+
+          README.md:
+          {readme}
+
+          CHANGELOG.md:
+          {changelog}
+
+          Responde en formato JSON exacto con la estructura:
+          {{
+            "problemas": [
+              {{
+                "tipo": "mecanico" o "requiere_humano",
+                "archivo": "nombre del archivo",
+                "descripcion": "descripción corta del problema",
+                "sugerencia": "qué hacer exactamente"
+              }}
+            ],
+            "resumen": "frase corta con el estado general"
+          }}"""
+
+          payload = {
+              "model": "qwen2.5-coder:7b",
+              "messages": [
+                  {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+                  {"role": "user", "content": prompt}
+              ],
+              "format": "json",
+              "stream": False,
+              "options": { "temperature": 0.1 }
+          }
+          
+          with open('payload.json', 'w') as f:
+              json.dump(payload, f)
+          EOF
+
+          curl -s -X POST "http://localhost:11434/api/chat" \
+            -H "Content-Type: application/json" \
+            -d @payload.json > api_response.json
+
+          python3 << 'EOF' > analisis.json
+          import json, sys
+          try:
+              with open('api_response.json', 'r') as f:
+                  data = json.load(f)
+              
+              if 'error' in data:
+                  fallback = { "problemas": [], "resumen": f"Error Ollama: {data['error']}" }
+                  print(json.dumps(fallback))
+                  sys.exit(0)
+                  
+              raw_text = data.get('message', {}).get('content', '').strip()
+              
+              if raw_text.startswith('```json\n'): raw_text = raw_text[8:]
+              elif raw_text.startswith('```json'): raw_text = raw_text[7:]
+              if raw_text.endswith('```'): raw_text = raw_text[:-3]
+              
+              json.loads(raw_text.strip())
+              print(raw_text.strip())
+              
+          except Exception as e:
+              fallback = { "problemas": [], "resumen": f"Fallo al procesar LLM: {str(e)}" }
+              print(json.dumps(fallback))
+          EOF
+
+      - name: Crear issues si hay problemas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 << 'EOF'
+          import json, subprocess
+          with open('analisis.json') as f:
+              analisis = json.load(f)
+          problemas = analisis.get('problemas', [])
+          creados = 0
+          for p in problemas:
+              if creados >= 3: break
+              tipo = p.get('tipo', '')
+              desc = p.get('descripcion', '')
+              sug = p.get('sugerencia', '')
+              archivo = p.get('archivo', '')
+              
+              if tipo == 'mecanico':
+                  labels = 'documentation,agent,agent:auto-fix'
+                  body = f"## Problema detectado por agente (qwen2.5-coder local)\n\n**Archivo:** `{archivo}`\n**Tipo:** Mecánico\n\n## Descripción\n{desc}\n\n## Sugerencia\n{sug}"
+              else:
+                  labels = 'documentation,agent'
+                  body = f"## Revisión requerida — agente (qwen2.5-coder local)\n\n**Archivo:** `{archivo}`\n**Tipo:** Requiere intervención humana\n\n## Descripción\n{desc}\n\n**Detalles:** {sug}"
+                  
+              titulo = f"[Agente] Documentación: {desc[:60]}"
+              subprocess.run(['gh', 'issue', 'create', '--title', titulo, '--body', body, '--label', labels])
+              creados += 1
+          EOF

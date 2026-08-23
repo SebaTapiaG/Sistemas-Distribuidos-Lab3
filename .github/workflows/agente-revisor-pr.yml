@@ -1,0 +1,135 @@
+name: Agente revisor de pull requests
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  revisor-mr:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Obtener diff del PR
+        run: git diff origin/main...HEAD > pr_diff.txt
+
+      - name: Cachear modelos de Ollama
+        uses: actions/cache@v4
+        with:
+          path: ollama_models
+          key: ollama-qwen2.5-coder-7b-${{ runner.os }}
+
+      - name: Iniciar Ollama en Docker
+        run: |
+          mkdir -p ollama_models
+          docker run -d -v $(pwd)/ollama_models:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+          echo "Esperando a que Ollama inicie..."
+          sleep 10
+          echo "Descargando/Verificando modelo qwen2.5-coder:7b..."
+          docker exec ollama ollama pull qwen2.5-coder:7b
+
+      - name: Revisar PR con Ollama Local
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          export DIFF_CONTENT=$(head -200 pr_diff.txt)
+          export TITULO="$PR_TITLE"
+          export BODY="$PR_BODY"
+          
+          python3 << 'EOF' > payload.json
+          import json, os
+          
+          diff = os.environ.get('DIFF_CONTENT', '')
+          titulo = os.environ.get('TITULO', '')
+          body = os.environ.get('BODY', '')
+          
+          prompt = f"""Eres un agente revisor de PRs para CivicMesh (Framework P2P Pub/Sub Python).
+          Título: {titulo}
+          Descripción: {body}
+          Diff:
+          {diff}
+
+          Clasifica este PR. Es MECANICO si solo altera documentación, formato, scripts menores o añade tests unitarios estándar.
+          Es REQUIERE_REVISION_HUMANA si altera la lógica central de membresía gossip, la función should_forward, fórmulas de percepción, cálculo de IDW o APIs de transporte de red.
+
+          Responde en JSON exacto:
+          {{
+            "veredicto": "MECANICO" o "REQUIERE_REVISION_HUMANA",
+            "razon": "explicación concisa",
+            "observaciones": ["obs1", "obs2"],
+            "tiene_issue_asociado": true o false
+          }}"""
+
+          payload = {
+              "model": "qwen2.5-coder:7b",
+              "messages": [
+                  {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+                  {"role": "user", "content": prompt}
+              ],
+              "format": "json",
+              "stream": False,
+              "options": { "temperature": 0.1 }
+          }
+          
+          with open('payload.json', 'w') as f:
+              json.dump(payload, f)
+          EOF
+
+          curl -s -X POST "http://localhost:11434/api/chat" \
+            -H "Content-Type: application/json" \
+            -d @payload.json > api_response.json
+
+          python3 << 'EOF' > revision.json
+          import json, sys
+          try:
+              with open('api_response.json', 'r') as f:
+                  data = json.load(f)
+              
+              if 'error' in data:
+                  fallback = { "veredicto": "REQUIERE_REVISION_HUMANA", "razon": f"Error Ollama: {data['error']}", "observaciones": [], "tiene_issue_asociado": False }
+                  print(json.dumps(fallback))
+                  sys.exit(0)
+                  
+              raw_text = data.get('message', {}).get('content', '').strip()
+              
+              if raw_text.startswith('```json\n'): raw_text = raw_text[8:]
+              elif raw_text.startswith('```json'): raw_text = raw_text[7:]
+              if raw_text.endswith('```'): raw_text = raw_text[:-3]
+              
+              json.loads(raw_text.strip())
+              print(raw_text.strip())
+              
+          except Exception as e:
+              fallback = { "veredicto": "REQUIERE_REVISION_HUMANA", "razon": "Fallo al procesar respuesta del LLM local", "observaciones": [f"Error técnico: {str(e)}"], "tiene_issue_asociado": False }
+              print(json.dumps(fallback))
+          EOF
+
+      - name: Comentar en el PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 << 'EOF'
+          import json, subprocess, os
+          with open('revision.json') as f:
+              rev = json.load(f)
+              
+          veredicto = rev.get('veredicto', 'REQUIERE_REVISION_HUMANA')
+          razon = rev.get('razon', '')
+          obs = rev.get('observaciones', [])
+          tiene_issue = rev.get('tiene_issue_asociado', False)
+          pr_number = os.environ['PR_NUMBER']
+          
+          issue_txt = 'Vinculado a Issue' if tiene_issue else 'Falta asociar Issue'
+          obs_txt = '\n'.join(f'- {o}' for o in obs)
+          
+          comentario = f"## Revisión del Agente qwen2.5-coder:7b (Local Ollama)\n\n**Veredicto:** `{veredicto}`\n**Razón:** {razon}\n\n**Estado:** {issue_txt}\n\n**Observaciones:**\n{obs_txt}\n\n> Recuerde que el agente nunca realiza merges automáticos."
+          
+          subprocess.run(['gh', 'pr', 'comment', pr_number, '--body', comentario])
+          EOF

@@ -1,0 +1,48 @@
+# Configuración Dominio B: Calidad del Aire (Medición vs Percepción)
+
+domain: "calidad_del_aire"
+seed: 42
+
+# Comunas con estaciones reales en dataset de referencia
+estaciones_ancla:
+  - "Santiago"
+  - "Las Condes"
+  - "La Florida"
+  - "Puente Alto"
+
+# Método de extrapolación espacial para comunas sin estación propia: "idw", "nearest", o "neighbor_avg"
+extrapolacion:
+  metodo: "idw"
+  power_p: 2.0
+
+# Archivo con el dataset cacheado
+cache_file: "data/air_quality_cache.json"
+
+# Umbrales OMS 2021 (ug/m3) para PM2.5 y PM10
+umbrales_oms_2021:
+  pm2_5:
+    buena: 5.0
+    moderada: 15.0
+    danina_sensibles: 25.0
+    danina: 50.0
+    muy_danina: 150.0
+  pm10:
+    buena: 15.0
+    moderada: 45.0
+    danina_sensibles: 75.0
+    danina: 150.0
+    muy_danina: 250.0
+
+# Parámetros del modelo subjetivo (Percepción del aire)
+# uc(t) = max(vc(t), Mc(t - \Delta t))
+# Mc(t) = \alpha * Mc(t - \Delta t) + (1 - \alpha) * uc(t)
+# Pc(t) = vc(t) + \gamma * (Mc(t) - vc(t)) + \delta * \hat{P}_gossip(t) + \epsilon_c(t)
+# clip a [0.0, 500.0]
+subjective:
+  alpha: 0.85       # Olvido lento de picos
+  gamma: 0.6        # Sesgo por pico retenido
+  delta: 0.3        # Arrastre por rumores
+  sigma_eps: 2.0    # Ruido gaussiano
+  rumor_summary: "mean"
+  clip_min: 0.0
+  clip_max: 500.0

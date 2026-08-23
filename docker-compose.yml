@@ -1,0 +1,106 @@
+version: '3.8'
+
+networks:
+  civicmesh-net:
+    driver: bridge
+
+volumes:
+  shared-runs:
+
+services:
+  peer1:
+    build: .
+    container_name: civicmesh-peer1
+    networks:
+      - civicmesh-net
+    volumes:
+      - shared-runs:/app/runs
+    environment:
+      - CIVICMESH_RUNS=/app/runs
+      - RUN_ID=compose-run
+    command: >
+      python -m civicmesh.node.peer
+      --id peer-1
+      --host peer1
+      --port 8001
+      --topics Santiago Providencia
+      --run-id compose-run
+
+  peer2:
+    build: .
+    container_name: civicmesh-peer2
+    networks:
+      - civicmesh-net
+    volumes:
+      - shared-runs:/app/runs
+    environment:
+      - CIVICMESH_RUNS=/app/runs
+      - RUN_ID=compose-run
+    depends_on:
+      - peer1
+    command: >
+      python -m civicmesh.node.peer
+      --id peer-2
+      --host peer2
+      --port 8002
+      --topics Providencia Las_Condes Nunoa
+      --seeds peer1:8001
+      --run-id compose-run
+
+  peer3:
+    build: .
+    container_name: civicmesh-peer3
+    networks:
+      - civicmesh-net
+    volumes:
+      - shared-runs:/app/runs
+    environment:
+      - CIVICMESH_RUNS=/app/runs
+      - RUN_ID=compose-run
+    depends_on:
+      - peer1
+    command: >
+      python -m civicmesh.node.peer
+      --id peer-3
+      --host peer3
+      --port 8003
+      --topics La_Florida Puente_Alto San_Joaquin
+      --seeds peer1:8001
+      --run-id compose-run
+
+  publisher:
+    build: .
+    container_name: civicmesh-publisher
+    networks:
+      - civicmesh-net
+    volumes:
+      - shared-runs:/app/runs
+    environment:
+      - CIVICMESH_RUNS=/app/runs
+      - RUN_ID=compose-run
+    depends_on:
+      - peer1
+      - peer2
+      - peer3
+    command: >
+      python -m civicmesh.node.publisher
+      --id pub-1
+      --domain delitos
+      --interval 2.0
+      --run-id compose-run
+
+  frontend:
+    build: .
+    container_name: civicmesh-frontend
+    networks:
+      - civicmesh-net
+    ports:
+      - "8501:8501"
+    volumes:
+      - shared-runs:/app/runs
+    environment:
+      - CIVICMESH_RUNS=/app/runs
+    depends_on:
+      - peer1
+    command: >
+      streamlit run frontend/app.py --server.port=8501 --server.address=0.0.0.0

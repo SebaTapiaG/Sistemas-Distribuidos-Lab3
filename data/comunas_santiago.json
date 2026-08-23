@@ -1,0 +1,64 @@
+{
+  "comunas": {
+    "Santiago": {
+      "nombre": "Santiago",
+      "lat": -33.4489,
+      "lon": -70.6693,
+      "vecinos": ["Providencia", "Recoleta", "Estacion Central", "San Joaquin", "Nunoa"]
+    },
+    "Providencia": {
+      "nombre": "Providencia",
+      "lat": -33.4314,
+      "lon": -70.6093,
+      "vecinos": ["Santiago", "Las Condes", "Nunoa", "Recoleta"]
+    },
+    "Las Condes": {
+      "nombre": "Las Condes",
+      "lat": -33.4117,
+      "lon": -70.5800,
+      "vecinos": ["Providencia", "Nunoa", "La Florida"]
+    },
+    "Nunoa": {
+      "nombre": "Nunoa",
+      "lat": -33.4569,
+      "lon": -70.5975,
+      "vecinos": ["Santiago", "Providencia", "Las Condes", "San Joaquin", "La Florida"]
+    },
+    "Estacion Central": {
+      "nombre": "Estacion Central",
+      "lat": -33.4617,
+      "lon": -70.7000,
+      "vecinos": ["Santiago", "Maipu", "San Joaquin"]
+    },
+    "Maipu": {
+      "nombre": "Maipu",
+      "lat": -33.5106,
+      "lon": -70.7572,
+      "vecinos": ["Estacion Central", "San Joaquin", "Puente Alto"]
+    },
+    "San Joaquin": {
+      "nombre": "San Joaquin",
+      "lat": -33.4917,
+      "lon": -70.6278,
+      "vecinos": ["Santiago", "Estacion Central", "Nunoa", "La Florida", "Maipu"]
+    },
+    "La Florida": {
+      "nombre": "La Florida",
+      "lat": -33.5228,
+      "lon": -70.5983,
+      "vecinos": ["Nunoa", "San Joaquin", "Puente Alto", "Las Condes"]
+    },
+    "Puente Alto": {
+      "nombre": "Puente Alto",
+      "lat": -33.6117,
+      "lon": -70.5758,
+      "vecinos": ["La Florida", "San Joaquin", "Maipu"]
+    },
+    "Recoleta": {
+      "nombre": "Recoleta",
+      "lat": -33.4069,
+      "lon": -70.6425,
+      "vecinos": ["Santiago", "Providencia"]
+    }
+  }
+}

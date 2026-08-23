@@ -1,0 +1,41 @@
+# Configuración global del framework CivicMesh
+
+global:
+  seed: 42
+  simulation_interval_sec: 2.0
+  comunas_file: "data/comunas_santiago.json"
+
+gossip:
+  # Fanout de membresía (número de peers contactados por ronda)
+  fanout: 2
+  # Tamaño máximo de la vista parcial de peers
+  partial_view_size: 6
+  # Intervalo de latidos / heartbeat en segundos
+  heartbeat_interval_sec: 1.0
+  # Tiempo tras el cual un peer se considera caído
+  fail_timeout_sec: 3.5
+  # Política de fanout: "random", "topic_biased", o "hybrid"
+  policy: "hybrid"
+  # Proporción de exploración aleatoria en política híbrida (0.0 a 1.0)
+  hybrid_random_ratio: 0.5
+
+pubsub:
+  # Deduplicación: tamaño máximo del historial de IDs de mensaje
+  dedup_cache_size: 2000
+  # Tiempo de vida de mensajes vistos en segundos
+  dedup_ttl_sec: 30.0
+  # Canales y sus políticas de reenvío
+  channels:
+    objective:
+      ttl: 4
+      priority: 1 # Mayor prioridad
+      fanout: 3
+    subjective:
+      ttl: 3
+      priority: 2
+      fanout: 2
+
+storage:
+  # Directorio base para runs (por defecto CIVICMESH_RUNS o fallback local)
+  runs_dir: "runs"
+  metrics_flush_interval_sec: 2.0

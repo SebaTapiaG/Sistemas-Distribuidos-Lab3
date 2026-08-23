@@ -1,0 +1,134 @@
+name: Agente revisor de bugs
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  revisor-bugs:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Cachear modelos de Ollama
+        uses: actions/cache@v4
+        with:
+          path: ollama_models
+          key: ollama-qwen2.5-coder-7b-${{ runner.os }}
+
+      - name: Iniciar Ollama en Docker
+        run: |
+          mkdir -p ollama_models
+          docker run -d -v $(pwd)/ollama_models:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+          sleep 10
+          docker exec ollama ollama pull qwen2.5-coder:7b
+
+      - name: Analizar código con Ollama Local
+        run: |
+          CODIGO=""
+          for f in civicmesh/core/*.py civicmesh/domains/*.py civicmesh/node/*.py; do
+            if [ -f "$f" ]; then
+              CODIGO="$CODIGO\n\n===$f ===\n$(head -n 80 "$f")"
+            fi
+          done
+          
+          if [ -z "$CODIGO" ]; then
+            CODIGO="No se encontraron archivos de CivicMesh aún."
+          fi
+          
+          export CODIGO_CONTENT="$CODIGO"
+
+          python3 << 'EOF' > payload.json
+          import json, os
+          
+          codigo = os.environ.get('CODIGO_CONTENT', '')
+          
+          prompt = f"""Eres un agente experto revisor de bugs para el framework distribuido CivicMesh (Python/Asyncio/Gossip/PubSub). Revisa este código buscando fallos como:
+          1. Falta de manejo de timeouts o excepciones en llamadas asíncronas de red.
+          2. Reenvío pub/sub sin decrementar TTL o sin chequear deduplicación (potencial flooding).
+          3. Generadores estocásticos que no utilicen semillas deterministas reproducibles (--seed).
+          4. Posibles divisiones por cero en IDW o cálculo de promedios de rumores vacíos.
+          
+          Código:
+          {codigo}
+
+          Responde en JSON exacto:
+          {{
+            "bugs": [
+              {{
+                "tipo": "mecanico" o "requiere_humano",
+                "archivo": "nombre",
+                "descripcion": "descripción",
+                "fix_sugerido": "código de arreglo"
+              }}
+            ]
+          }}"""
+
+          payload = {
+              "model": "qwen2.5-coder:7b",
+              "messages": [
+                  {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
+                  {"role": "user", "content": prompt}
+              ],
+              "format": "json",
+              "stream": False,
+              "options": { "temperature": 0.1 }
+          }
+          
+          with open('payload.json', 'w') as f:
+              json.dump(payload, f)
+          EOF
+
+          curl -s -X POST "http://localhost:11434/api/chat" \
+            -H "Content-Type: application/json" \
+            -d @payload.json > api_response.json
+
+          python3 << 'EOF' > bugs.json
+          import json, sys
+          try:
+              with open('api_response.json', 'r') as f:
+                  data = json.load(f)
+              
+              if 'error' in data:
+                  fallback = { "bugs": [] }
+                  print(json.dumps(fallback))
+                  sys.exit(0)
+                  
+              raw_text = data.get('message', {}).get('content', '').strip()
+              
+              if raw_text.startswith('```json\n'): raw_text = raw_text[8:]
+              elif raw_text.startswith('```json'): raw_text = raw_text[7:]
+              if raw_text.endswith('```'): raw_text = raw_text[:-3]
+              
+              json.loads(raw_text.strip())
+              print(raw_text.strip())
+              
+          except Exception as e:
+              fallback = { "bugs": [] }
+              print(json.dumps(fallback))
+          EOF
+
+      - name: Crear issues para bugs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 << 'EOF'
+          import json, subprocess
+          with open('bugs.json') as f:
+              resultado = json.load(f)
+          for bug in resultado.get('bugs', []):
+              tipo = bug.get('tipo', '')
+              archivo = bug.get('archivo', 'desconocido')
+              desc = bug.get('descripcion', '')
+              fix = bug.get('fix_sugerido', '')
+              
+              labels = 'bug,agent,python' + (',agent:auto-fix' if tipo == 'mecanico' else '')
+              prefijo = "[Agente] Bug mecánico" if tipo == 'mecanico' else "[Agente] Bug — requiere revisión humana"
+              
+              body = f"## Bug detectado por agente (qwen2.5-coder local)\n\n**Archivo:** `{archivo}`\n\n## Descripción\n{desc}\n\n## Fix sugerido\n```python\n{fix}\n```"
+              subprocess.run(['gh', 'issue', 'create', '--title', f"{prefijo}: {desc[:55]}", '--body', body, '--label', labels])
+          EOF

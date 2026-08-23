@@ -1,0 +1,42 @@
+name: CI CivicMesh
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test-and-lint:
+    name: Test and Lint Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Linting con flake8
+        run: |
+          # Stop build if there are Python syntax errors or undefined names
+          flake8 civicmesh tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
+          flake8 civicmesh tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Pruebas Unitarias
+        run: |
+          pytest tests/unit/ -v
+
+      - name: Pruebas de Integración
+        run: |
+          pytest tests/integration/ -v

@@ -1,0 +1,77 @@
+# Configuración Dominio A: Delitos (Percepción vs Realidad)
+
+domain: "delitos"
+seed: 42
+
+# Parámetros del generador Poisson para canal objetivo por comuna y tipo de delito
+# X_{c,k}(t) ~ Poisson(\lambda_{c,k} * \Delta t)
+crime_types:
+  - "robo_con_violencia"
+  - "hurto"
+  - "robo_lugar_no_habitado"
+  - "homicidio"
+
+# Tasas base (\lambda) por comuna (eventos por minuto o paso de simulación)
+comuna_lambdas:
+  Santiago:
+    robo_con_violencia: 1.8
+    hurto: 3.5
+    robo_lugar_no_habitado: 1.2
+    homicidio: 0.05
+  Providencia:
+    robo_con_violencia: 0.9
+    hurto: 2.2
+    robo_lugar_no_habitado: 0.8
+    homicidio: 0.01
+  Las Condes:
+    robo_con_violencia: 0.6
+    hurto: 1.5
+    robo_lugar_no_habitado: 0.7
+    homicidio: 0.01
+  Nunoa:
+    robo_con_violencia: 0.8
+    hurto: 1.8
+    robo_lugar_no_habitado: 0.6
+    homicidio: 0.02
+  Estacion Central:
+    robo_con_violencia: 2.0
+    hurto: 3.0
+    robo_lugar_no_habitado: 1.4
+    homicidio: 0.06
+  Maipu:
+    robo_con_violencia: 1.5
+    hurto: 2.5
+    robo_lugar_no_habitado: 1.1
+    homicidio: 0.04
+  San Joaquin:
+    robo_con_violencia: 1.4
+    hurto: 2.0
+    robo_lugar_no_habitado: 0.9
+    homicidio: 0.04
+  La Florida:
+    robo_con_violencia: 1.3
+    hurto: 2.1
+    robo_lugar_no_habitado: 1.0
+    homicidio: 0.03
+  Puente Alto:
+    robo_con_violencia: 2.2
+    hurto: 2.8
+    robo_lugar_no_habitado: 1.5
+    homicidio: 0.07
+  Recoleta:
+    robo_con_violencia: 1.7
+    hurto: 2.6
+    robo_lugar_no_habitado: 1.3
+    homicidio: 0.05
+
+# Parámetros del modelo subjetivo (Inseguridad)
+# Mc(t) = \alpha * Mc(t - \Delta t) + (1 - \alpha) * Rc(t)
+# Zc(t) = \beta_0 + \beta_1 * Mc(t) + \beta_2 * \hat{P}_gossip(t) + \epsilon_c(t)
+# Pc(t) = \sigma(Zc(t)) = 1 / (1 + e^{-Zc(t)})
+subjective:
+  alpha: 0.8        # Factor de memoria EMA
+  beta_0: -1.0      # Sesgo base
+  beta_1: 0.4       # Peso de la memoria local
+  beta_2: 0.8       # Peso del rumor gossip
+  sigma_eps: 0.1    # Ruido gaussiano
+  rumor_summary: "mean"  # "mean" o "max"
