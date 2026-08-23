@@ -40,3 +40,53 @@ jobs:
       - name: Pruebas de Integración
         run: |
           pytest tests/integration/ -v
+
+  docker-build:
+    name: Docker Build & Compose Smoke Test
+    runs-on: ubuntu-latest
+    needs: test-and-lint
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Construir imagen
+        run: docker compose build
+
+      - name: Levantar malla (3 peers + publicador + frontend)
+        run: |
+          docker compose up -d
+          echo "Esperando a que los servicios inicien..."
+          sleep 15
+
+      - name: Verificar que los contenedores siguen corriendo
+        run: |
+          docker compose ps
+          # Si algún servicio salió con error, docker compose ps lo marca como "Exit"
+          if docker compose ps --status exited | grep -q .; then
+            echo "Uno o más servicios de la malla terminaron inesperadamente:"
+            docker compose ps --status exited
+            docker compose logs
+            exit 1
+          fi
+
+      - name: Verificar frontend responde en :8501
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8501/_stcore/health > /dev/null; then
+              echo "Frontend OK"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Frontend no respondió a tiempo"
+          docker compose logs frontend
+          exit 1
+
+      - name: Logs de la malla (siempre, para debugging)
+        if: always()
+        run: docker compose logs
+
+      - name: Apagar malla
+        if: always()
+        run: docker compose down -v
