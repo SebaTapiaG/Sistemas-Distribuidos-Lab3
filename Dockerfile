@@ -18,6 +18,7 @@ COPY config/ /app/config/
 COPY data/ /app/data/
 COPY frontend/ /app/frontend/
 COPY scripts/ /app/scripts/
+COPY .streamlit/ /app/.streamlit/
 
 ENV PYTHONPATH=/app
 ENV CIVICMESH_RUNS=/app/runs

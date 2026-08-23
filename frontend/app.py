@@ -18,7 +18,22 @@ st.set_page_config(
     page_title="CivicMesh Monitor - SDP 1-2026",
     page_icon="📡",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+# Ocultar botones de deploy, menús publicitarios y encabezado de Streamlit
+st.markdown("""
+<style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stDeployButton {display: none !important; visibility: hidden !important;}
+    [data-testid="stToolbar"] {display: none !important; visibility: hidden !important;}
+    [data-testid="stDecoration"] {display: none !important; visibility: hidden !important;}
+    [data-testid="stHeader"] {display: none !important; visibility: hidden !important;}
+    div[class*="stDeployButton"] {display: none !important;}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("📡 CivicMesh: Monitoreo Ciudadano P2P")
 st.markdown(

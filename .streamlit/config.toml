@@ -1,0 +1,10 @@
+[client]
+showErrorDetails = true
+toolbarMode = "viewer"
+
+[server]
+headless = true
+gatherUsageStats = false
+
+[ui]
+hideTopBar = true
