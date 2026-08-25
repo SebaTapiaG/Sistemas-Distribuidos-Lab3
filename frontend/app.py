@@ -145,21 +145,25 @@ for m_file in metric_files:
 
 # ==========================================
 # 5. KPIS GLOBALES
-# ==========================================
-total_peers = len(set(r.get("peer_id") for r in peer_records))
+# ========================================== 
+latest_ts = max([r.get("timestamp", 0) for r in peer_records + publisher_records], default=0)
+
+# NUEVO: Contar solo peers vivos (con métricas en los últimos 5 segundos)
+active_peers = 0
+for p_id in set(r.get("peer_id") for r in peer_records):
+    p_last = [r for r in peer_records if r.get("peer_id") == p_id][-1]
+    if latest_ts - p_last.get("timestamp", 0) <= 5.0:
+        active_peers += 1
+
 total_pubs = len(set(r.get("publisher_id") for r in publisher_records))
 all_topics = set()
 for r in peer_records: all_topics.update(r.get("topics", {}).keys())
-latest_ts = max([r.get("timestamp", 0) for r in peer_records + publisher_records], default=0)
 
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-m_col1.metric("Peers Activos", total_peers)
+m_col1.metric("Peers Activos", active_peers) # Actualizado a la variable real
 m_col2.metric("Publicadores", total_pubs)
 m_col3.metric("Comunas", len(all_topics))
 m_col4.metric("Últ. Actualización", time.strftime("%H:%M:%S", time.localtime(latest_ts)) if latest_ts else "N/A")
-
-st.write("")
-st.write("")
 
 # ==========================================
 # 6. PROCESAMIENTO DE SNAPSHOT
