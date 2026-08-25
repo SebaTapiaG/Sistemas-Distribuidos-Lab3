@@ -9,13 +9,13 @@
 
 ## 1. Integrantes del Equipo y Roles
 
-| Nombre | Rol Principal | Responsabilidades Evaluadas |
+| Nombre | Rol Principal | Responsabilidades |
 | :--- | :--- | :--- |
-| **Sebastián Tapia** | Líder de Capa de Red / Gossip | Diseño de protocolo de membresía gossip, mantenimiento de vista parcial, detección de caídas por timeout y políticas de fanout (random, topic-biased, hybrid). |
-| **Rodrigo González** | Líder de Capa Pub/Sub | Tópicos comunales, suscripciones, reenvío explícito determinista anti-flooding (`should_forward`), gestión de TTL decreciente y prioridades por canal. |
-| **Juan Loyola** | Líder de Datos | Ingesta y cache de series reales continuas de PM2.5/PM10 (Open-Meteo), interpolación espacial IDW, generador estocástico Poisson para delitos y modelos de percepción (fórmulas 1 a 5). |
-| **Vicente Aninat** | Líder de Analítica y Estadística | Métricas de convergencia y dispersión, experimentos de tolerancia a fallos/partición, y desarrollo del frontend de monitoreo en Streamlit. |
-| **Ignacio Celis Castro** | Líder de CI/CD, Git y Agentes | Pipeline de CI/CD en GitHub Actions, contenedores Docker / Docker Compose, scripts sbatch/srun para Slurm en clúster DIINF, coordinación en Shared FS, y los 3 agentes de IA (Ollama `qwen2.5-coder:7b`). |
+| **Sebastián Tapia** | Líder de Capa de Red / Gossip | Diseño del protocolo de membresía, mantención de la vista parcial, detección de fallos (timeouts) y políticas de fanout. |
+| **Rodrigo González** | Líder de Capa Pub/Sub | Configuración de tópicos comunales, suscripciones, función `should_forward` (anti-flooding), y gestión de TTL/prioridad. |
+| **Juan Loyola** | Líder de Datos | Ingesta de series de calidad del aire (Open-Meteo/SINCA), replay, interpolación IDW y generadores estocásticos (Poisson/Percepción). |
+| **Vicente Aninat** | Líder de Analítica y Estadística | Análisis de métricas (convergencia/divergencia), experimentos de partición de red y desarrollo del frontend (Streamlit). |
+| **Ignacio Celis Castro** | Líder de CI/CD, Git y Agentes | Orquestación en GitHub Actions, Docker Compose, scripts Slurm (`sbatch`), sistema de archivos compartido y agentes IA. |
 
 ---
 
@@ -61,30 +61,22 @@ CivicMesh implementa una infraestructura P2P desacoplada sobre Python asíncrono
 ## 3. Dominios de Aplicación y Modelos Matemáticos
 
 ### Dominio A — Delitos (Percepción vs. Realidad)
-- **Canal Objetivo:** Generación estocástica por comuna $c$ y tipo de delito $k$:
-  $$X_{c,k}(t) \sim \text{Poisson}(\lambda_{c,k} \cdot \Delta t), \quad R_c(t) = \sum_k X_{c,k}(t)$$
-- **Canal Subjetivo (Índice de Inseguridad $P_c(t) \in [0, 1]$):**
-  $$M_c(t) = \alpha M_c(t - \Delta t) + (1 - \alpha) R_c(t) \quad \text{con } M_c(0) = 0$$
-  $$Z_c(t) = \beta_0 + \beta_1 M_c(t) + \beta_2 \hat{P}_c^{\text{gossip}}(t) + \varepsilon_c(t), \quad \varepsilon_c(t) \sim \mathcal{N}(0, \sigma_\varepsilon^2)$$
-  $$P_c(t) = \sigma(Z_c(t)) = \frac{1}{1 + e^{-Z_c(t)}}$$
-  *Parámetros base:* $\alpha = 0,8$, $\beta_0 = -1,0$, $\beta_1 = 0,4$, $\beta_2 = 0,8$, $\sigma_\varepsilon = 0,1$.
+**Canal Objetivo:** Generación de eventos discretos por comuna $c$ y tipo de delito $k$ usando un proceso de Poisson:
+$$X_{c,k}(t)\sim Poisson(\lambda_{c,k}\Delta t)$$
+**Canal Subjetivo (Índice de Inseguridad):** Combina el ground truth local ($R_{c}(t)$), una memoria EMA ($M_{c}(t)$) y los rumores de la red ($\hat{P}_{c}^{gossip}(t)$):
+$$M_{c}(t)=\alpha M_{c}(t-\Delta t)+(1-\alpha)R_{c}(t)$$
+$$Z_{c}(t)=\beta_{0}+\beta_{1}M_{c}(t)+\beta_{2}\hat{P}_{c}^{gossip}(t)+\epsilon_{c}(t)$$
+$$P_{c}(t)=\sigma(Z_{c}(t))$$
 
 ### Dominio B — Calidad del Aire (Medición vs. Percepción)
-- **Canal Objetivo:** Replay determinista de series reales de PM2.5 ($\mu\text{g}/\text{m}^3$) de estaciones oficiales (Open-Meteo). Para comunas intermedias sin estación se aplica interpolación espacial **IDW (Inverse Distance Weighting)** con potencia $p = 2$:
-  $$v_c(t) = \frac{\sum_{s \in S} w_s v_s(t)}{\sum_{s \in S} w_s}, \quad w_s = \frac{1}{d(c, s)^p}$$
-- **Canal Subjetivo (Percepción Ciudadana $P_c(t)$ en $\mu\text{g}/\text{m}^3$ con retención de picos):**
-  $$u_c(t) = \max(v_c(t), M_c(t - \Delta t))$$
-  $$M_c(t) = \alpha M_c(t - \Delta t) + (1 - \alpha) u_c(t) \quad \text{con } M_c(0) = 0$$
-  $$P_c(t) = v_c(t) + \gamma (M_c(t) - v_c(t)) + \delta \hat{P}_c^{\text{gossip}}(t) + \varepsilon_c(t)$$
-  *Parámetros base:* $\alpha = 0,85$, $\gamma = 0,6$ (sesgo por pico retenido), $\delta = 0,3$ (arrastre por rumores), $\sigma_\varepsilon = 2,0$, clip en $[0; 500]$.
-- **Contexto Regulatorio OMS 2021 (PM2.5):**
-  - Buena: $\le 5\,\mu\text{g}/\text{m}^3$
-  - Moderada: $\le 15\,\mu\text{g}/\text{m}^3$
-  - Dañina grupos sensibles: $\le 25\,\mu\text{g}/\text{m}^3$
-  - Dañina: $\le 50\,\mu\text{g}/\text{m}^3$
-  - Muy Dañina: $\le 150\,\mu\text{g}/\text{m}^3$
-  - Peligrosa: $> 150\,\mu\text{g}/\text{m}^3$
-
+**Canal Objetivo:** Replay de series reales continuas. Para comunas sin estación, se extrapola usando IDW (Inverse Distance Weighting) con potencia $p$:
+$$v_{c}(t)=\frac{\sum_{s\in S}w_{s}v_{s}(t)}{\sum_{s\in S}w_{s}}$$
+$$w_{s}=\frac{1}{d(c,s)^{p}}$$
+**Canal Subjetivo (Retención de picos):**
+$$u_{c}(t)=\max(v_{c}(t),M_{c}(t-\Delta t))$$
+$$M_{c}(t)=\alpha M_{c}(t-\Delta t)+(1-\alpha)u_{c}(t)$$
+$$P_{c}(t)=v_{c}(t)+\gamma(M_{c}(t)-v_{c}(t))+\delta\hat{P}_{c}^{gossip}(t)+\epsilon_{c}(t)$$
+*Umbrales OMS 2021 (PM2.5):* Buena <= 5, Moderada <= 15, Dañina <= 50.
 ---
 
 ## 4. Guía de Instalación y Ejecución
@@ -106,7 +98,25 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4.3 Ejecución de Pruebas Automatizadas
+### 4.3 Configuración de Entorno y Ejecución Local
+
+# Exportar variable de entorno para la corrida local
+export CIVICMESH_RUNS="./runs/local-run"
+mkdir -p $CIVICMESH_RUNS/metrics $CIVICMESH_RUNS/logs
+
+# 1. Levantar Peer Seed
+python -m civicmesh.node.peer --id peer-1 --host localhost --port 8001 --topics Santiago Providencia --run-id local-run &
+
+# 2. Levantar Peer secundario (conectado a peer-1)
+python -m civicmesh.node.peer --id peer-2 --host localhost --port 8002 --topics Providencia Las_Condes --seeds localhost:8001 --run-id local-run &
+
+# 3. Levantar Publicador
+python -m civicmesh.node.publisher --id pub-1 --domain delitos --interval 2.0 --run-id local-run &
+
+# 4. Levantar Dashboard Frontend
+streamlit run frontend/app.py --server.port=8501
+
+### 4.4 Ejecución de Pruebas Automatizadas
 ```bash
 # Ejecutar suite completa (unitarias + integración)
 pytest -v
@@ -142,17 +152,25 @@ En el clúster del DIINF, el despliegue separa estrictamente los roles sin utili
            └── logs/        (stdout/stderr)
 ```
 
-### 5.1 Lanzamiento del Job Slurm
+### 5.1 Convención del Shared Filesystem
+
+En el clúster Slurm, la variable $CIVICMESH_RUNS se resuelve dinámicamente en el almacenamiento compartido NFS/Shared FS para permitir la coordinación entre nodos CPU y GPU
+
+```bash
+export CIVICMESH_RUNS="$HOME/proyecto/$SLURM_JOB_ID"
+```
+
+### 5.2 Lanzamiento del Job Slurm
 ```bash
 sbatch scripts/slurm/run_cluster.sbatch
 ```
 
-### 5.2 Acceso al Frontend mediante Túnel SSH
+### 5.3 Acceso al Frontend mediante Túnel SSH
 Si el frontend se inicia en el nodo GPU asignado (por ejemplo `gpu02`):
 ```bash
 ssh -L 8501:gpu02:8501 <usuario>@<login.diinf.usach.cl>
 ```
-
+Luego navega a http://localhost:8501 en tu máquina local.
 ---
 
 ## 🤖 6. Agentes de IA Integrados (Laboratorio 2 adaptados)
