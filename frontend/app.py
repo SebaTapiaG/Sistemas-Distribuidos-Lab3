@@ -145,7 +145,7 @@ for m_file in metric_files:
 
 # ==========================================
 # 5. KPIS GLOBALES
-# ==========================================
+# ========================================== 
 latest_ts = max([r.get("timestamp", 0) for r in peer_records + publisher_records], default=0)
 
 # NUEVO: Contar solo peers vivos (con métricas en los últimos 5 segundos)
