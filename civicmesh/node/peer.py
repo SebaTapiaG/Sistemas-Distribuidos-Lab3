@@ -199,6 +199,8 @@ class PeerNode:
 
     async def _hostfile_discovery_loop(self):
         """Lee periódicamente hostfile.txt en el shared FS para descubrir nuevos nodos."""
+        descubiertos = set() # NUEVO: Memoria de peers ya descubiertos por archivo
+        
         while self._running:
             try:
                 await asyncio.sleep(3.0)
@@ -206,12 +208,18 @@ class PeerNode:
                 for p_dict in registered:
                     if p_dict["host"] == self.host and p_dict["port"] == self.port:
                         continue
-                    p_info = PeerInfo(
-                        peer_id=p_dict["node_id"],
-                        host=p_dict["host"],
-                        port=p_dict["port"],
-                    )
-                    self.gossip.update_peer(p_info)
+                    
+                    peer_id = p_dict["node_id"]
+                    
+                    # NUEVO: Solo inyectar al Gossip si es la primera vez que lo leemos
+                    if peer_id not in descubiertos:
+                        descubiertos.add(peer_id)
+                        p_info = PeerInfo(
+                            peer_id=peer_id,
+                            host=p_dict["host"],
+                            port=p_dict["port"],
+                        )
+                        self.gossip.update_peer(p_info)
             except asyncio.CancelledError:
                 break
             except Exception:
