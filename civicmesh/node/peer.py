@@ -149,6 +149,11 @@ class PeerNode:
                         rumor_val=val,
                         hop_count=msg.header.hop_count,
                     )
+                    self.state.set_subjective_perception(
+                    topic=topic,
+                    perception_val=val,
+                    ema_val=msg.payload.get("ema_memory", val),
+                    )
 
             # Reenvío controlado (anti-flooding)
             if must_forward:
